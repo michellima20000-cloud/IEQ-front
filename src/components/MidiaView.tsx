@@ -454,32 +454,19 @@ export default function MidiaView() {
         </div>
       </div>
 
-      {/* Banner de instalação PWA */}
+      {/* Botão discreto de instalação PWA */}
       {showInstallBanner && !appInstalado && (
-        <div className="card card-pad border border-blue-500/30 bg-blue-500/5 rounded-xl flex items-center gap-3 animate-fade-in">
-          <Download size={20} className="text-blue-400 shrink-0" />
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-blue-300">Instale o app IEQ</h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Use o sistema como aplicativo no seu celular, com atalho na tela inicial e uso offline.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={instalarApp}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded font-medium transition-colors"
-            >
-              Instalar
-            </button>
-            <button
-              onClick={() => setShowInstallBanner(false)}
-              className="px-2 py-1.5 text-slate-500 hover:text-slate-300 rounded"
-            >
-              <X size={16} />
-            </button>
-          </div>
+        <div className="flex justify-end">
+          <button
+            onClick={instalarApp}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 rounded text-xs text-blue-400"
+          >
+            <Download size={14} className="shrink-0" />
+            Instalar app
+          </button>
         </div>
       )}
+
       <nav className="flex flex-wrap gap-2">
         {abas.map(a => (
           <button
