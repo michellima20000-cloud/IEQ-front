@@ -5,7 +5,7 @@ import {
   Check, Inbox, MapPin, Pencil, Trash2, RotateCcw, Youtube,
   CircleCheck, TriangleAlert, X
 } from 'lucide-react';
-import { api } from '../api/client';
+import { api, ApiClient } from '../api/client';
 
 interface MediaItem {
   id: string;
@@ -127,6 +127,7 @@ export default function MidiaView() {
   const [uploadArquivo, setUploadArquivo] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [arquivoInfo, setArquivoInfo] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadYoutube, setUploadYoutube] = useState('');
   const [uploadRequerAprovacao, setUploadRequerAprovacao] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -222,60 +223,81 @@ export default function MidiaView() {
       setErro('O arquivo excede o limite de 50 MB.'); return;
     }
 
-    setCarregando(true);
-    let ultimoErro: any = null;
-    try {
-      let tentativa = 0;
-      const maxTentativas = 2;
-      while (tentativa < maxTentativas) {
-        tentativa++;
-        try {
-          let corpo: any = {
-            tipo: uploadTipo,
-            titulo: uploadTitulo,
-            descricao: uploadDescricao || null,
-            precisaAprovacao: uploadRequerAprovacao,
-          };
-          if (uploadYoutube) corpo.videoUrl = uploadYoutube;
-          if (uploadArquivo) {
-            let arquivoParaEnvio = uploadArquivo;
-            if ((uploadTipo === 'BANNER' || uploadTipo === 'FOTO') && uploadArquivo.type.startsWith('image/')) {
-              try {
-                arquivoParaEnvio = await redimensionarImagem(uploadArquivo, 1920, 0.85);
-              } catch {
-                // segue com o arquivo original se o processamento falhar
-              }
-            }
-            // Multipart com o arquivo binário (sem converter para base64,
-            // que estourava a requisição e causava o erro "Falha ao buscar")
-            const fd = new FormData();
-            fd.append('tipo', corpo.tipo);
-            fd.append('titulo', corpo.titulo);
-            if (corpo.descricao) fd.append('descricao', corpo.descricao);
-            fd.append('videoUrl', corpo.videoUrl || '');
-            fd.append('precisaAprovacao', String(corpo.precisaAprovacao));
-            fd.append('arquivo', arquivoParaEnvio);
-            corpo = fd;
-          }
+    const token = ApiClient.getAccessToken();
+    if (!token) { setErro('Sessão expirada. Faça login novamente.'); return; }
 
-          await api.post('/midia', corpo);
-          setSucesso('Mídia enviada com sucesso!');
-          setUploadTitulo(''); setUploadDescricao(''); setUploadYoutube('');
-          setUploadArquivo(null); if (fileRef.current) fileRef.current.value = '';
-          await carregarMidias();
-          return;
-        } catch (err: any) {
-          ultimoErro = err;
-          // Sem resposta do servidor = erro de rede (ex: "Failed to fetch"): tenta mais uma vez
-          if (tentativa < maxTentativas && !err?.response) {
-            continue;
-          }
-          setErro(msgErro(err, 'Falha ao enviar a mídia. Verifique sua conexão e tente novamente.'));
-          break;
-        }
+    let arquivoParaEnvio = uploadArquivo;
+    if ((uploadTipo === 'BANNER' || uploadTipo === 'FOTO') && uploadArquivo?.type.startsWith('image/')) {
+      try {
+        arquivoParaEnvio = await redimensionarImagem(uploadArquivo, 1920, 0.85);
+      } catch {
+        // segue com o arquivo original se o processamento falhar
       }
+    }
+
+    const fd = new FormData();
+    fd.append('tipo', uploadTipo);
+    fd.append('titulo', uploadTitulo);
+    if (uploadDescricao) fd.append('descricao', uploadDescricao);
+    if (uploadYoutube) fd.append('videoUrl', uploadYoutube);
+    fd.append('precisaAprovacao', String(uploadRequerAprovacao));
+    if (arquivoParaEnvio) fd.append('arquivo', arquivoParaEnvio);
+
+    const UPLOAD_TIMEOUT_MS = 180_000; // 3 minutos
+    setCarregando(true);
+    setUploadProgress(0);
+
+    try {
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        const tempoLimite = setTimeout(() => {
+          xhr.abort();
+          reject(new Error('O upload demorou mais que 3 minutos. Tente um arquivo menor ou verifique sua conexão.'));
+        }, UPLOAD_TIMEOUT_MS);
+
+        xhr.upload.addEventListener('progress', (ev) => {
+          if (ev.lengthComputable) {
+            setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          clearTimeout(tempoLimite);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(xhr.responseText);
+          } else {
+            let mensagem = 'Erro ao enviar a mídia.';
+            try { mensagem = JSON.parse(xhr.responseText)?.message || mensagem; } catch { /* ignora */ }
+            reject(new Error(mensagem));
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          clearTimeout(tempoLimite);
+          reject(new Error('Falha de conexão ao enviar a mídia. Verifique sua internet.'));
+        });
+
+        xhr.addEventListener('abort', () => {
+          clearTimeout(tempoLimite);
+          reject(new Error('Upload cancelado.'));
+        });
+
+        xhr.open('POST', `${ApiClient['getBaseUrl']()}/midia`);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.send(fd);
+      });
+
+      setSucesso('Mídia enviada com sucesso!');
+      setUploadTitulo(''); setUploadDescricao(''); setUploadYoutube('');
+      setUploadArquivo(null); setPreviewUrl(null); setArquivoInfo(null); setUploadProgress(0);
+      if (fileRef.current) fileRef.current.value = '';
+      await carregarMidias();
+    } catch (err: any) {
+      setUploadProgress(0);
+      setErro(msgErro(err, 'Falha ao enviar a mídia. Verifique sua conexão e tente novamente.'));
     } finally {
       setCarregando(false);
+      setUploadProgress(0);
     }
   }
 
@@ -561,6 +583,21 @@ export default function MidiaView() {
             <Upload size={16} />
             {carregando ? 'Enviando...' : 'Enviar Mídia'}
           </button>
+
+          {uploadProgress > 0 && uploadProgress < 100 && (
+            <div className="mt-3">
+              <div className="w-full bg-slate-800 rounded-full h-2">
+                <div
+                  className="bg-blue-500 h-2 rounded-full transition-all duration-100"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-[11px] text-slate-400 mt-1">
+                <span>Enviando arquivo...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+            </div>
+          )}
         </form>
       )}
 
