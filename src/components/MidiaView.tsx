@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Megaphone, Upload, ClipboardList, Calendar, Palette, ImagePlus,
   Check, Inbox, MapPin, Pencil, Trash2, RotateCcw, Youtube,
-  CircleCheck, TriangleAlert, X
+  CircleCheck, TriangleAlert, X, Download
 } from 'lucide-react';
 import { api, ApiClient } from '../api/client';
 
@@ -128,6 +128,42 @@ export default function MidiaView() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [arquivoInfo, setArquivoInfo] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Instalação PWA
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const appInstalado =
+    typeof window !== 'undefined' &&
+    window.matchMedia('(display-mode: standalone)').matches;
+
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      // Só mostra o banner se ainda não estiver instalado e não for mobile com app instalado
+      if (!appInstalado) setShowInstallBanner(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    window.addEventListener('appinstalled', () => {
+      setShowInstallBanner(false);
+      setDeferredPrompt(null);
+    });
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('appinstalled', () => {});
+    };
+  }, [appInstalado]);
+
+  const instalarApp = () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then((resultado: any) => {
+      if (resultado.outcome === 'accepted') {
+        setShowInstallBanner(false);
+        setDeferredPrompt(null);
+      }
+    });
+  };
   const [uploadYoutube, setUploadYoutube] = useState('');
   const [uploadRequerAprovacao, setUploadRequerAprovacao] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -418,7 +454,32 @@ export default function MidiaView() {
         </div>
       </div>
 
-      {/* Abas */}
+      {/* Banner de instalação PWA */}
+      {showInstallBanner && !appInstalado && (
+        <div className="card card-pad border border-blue-500/30 bg-blue-500/5 rounded-xl flex items-center gap-3 animate-fade-in">
+          <Download size={20} className="text-blue-400 shrink-0" />
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-blue-300">Instale o app IEQ</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Use o sistema como aplicativo no seu celular, com atalho na tela inicial e uso offline.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={instalarApp}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded font-medium transition-colors"
+            >
+              Instalar
+            </button>
+            <button
+              onClick={() => setShowInstallBanner(false)}
+              className="px-2 py-1.5 text-slate-500 hover:text-slate-300 rounded"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
       <nav className="flex flex-wrap gap-2">
         {abas.map(a => (
           <button
