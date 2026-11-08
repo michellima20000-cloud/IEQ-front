@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Megaphone, Upload, ClipboardList, Calendar, Palette, ImagePlus,
   Check, Inbox, MapPin, Pencil, Trash2, RotateCcw, Youtube,
-  CircleCheck, TriangleAlert,
+  CircleCheck, TriangleAlert, X
 } from 'lucide-react';
 import { api } from '../api/client';
 
@@ -65,6 +65,44 @@ function lerArquivoDataUrl(file: File): Promise<string> {
   });
 }
 
+/**
+ * Redimensiona uma imagem para evitar uploads gigantes e manter as publicações
+ * leves e consistentes. Não altera vídeos.
+ */
+function redimensionarImagem(file: File, maxWidth = 1920, qualidade = 0.85): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let largura = img.width;
+      let altura = img.height;
+      if (largura <= maxWidth) {
+        resolve(file);
+        return;
+      }
+      altura = Math.round((altura * maxWidth) / largura);
+      largura = maxWidth;
+      const canvas = document.createElement('canvas');
+      canvas.width = largura;
+      canvas.height = altura;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(file); return; }
+      ctx.drawImage(img, 0, 0, largura, altura);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) { resolve(file); return; }
+          const nome = file.name.replace(/\.[^/.]+$/, '.jpg');
+          const novoArquivo = new File([blob], nome, { type: 'image/jpeg', lastModified: Date.now() });
+          resolve(novoArquivo);
+        },
+        'image/jpeg',
+        qualidade
+      );
+    };
+    img.onerror = () => reject(new Error('Falha ao processar a imagem.'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 function isoParaDatetimeLocal(iso?: string): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -87,6 +125,8 @@ export default function MidiaView() {
   const [uploadTitulo, setUploadTitulo] = useState('');
   const [uploadDescricao, setUploadDescricao] = useState('');
   const [uploadArquivo, setUploadArquivo] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [arquivoInfo, setArquivoInfo] = useState<string | null>(null);
   const [uploadYoutube, setUploadYoutube] = useState('');
   const [uploadRequerAprovacao, setUploadRequerAprovacao] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -198,6 +238,14 @@ export default function MidiaView() {
           };
           if (uploadYoutube) corpo.videoUrl = uploadYoutube;
           if (uploadArquivo) {
+            let arquivoParaEnvio = uploadArquivo;
+            if ((uploadTipo === 'BANNER' || uploadTipo === 'FOTO') && uploadArquivo.type.startsWith('image/')) {
+              try {
+                arquivoParaEnvio = await redimensionarImagem(uploadArquivo, 1920, 0.85);
+              } catch {
+                // segue com o arquivo original se o processamento falhar
+              }
+            }
             // Multipart com o arquivo binário (sem converter para base64,
             // que estourava a requisição e causava o erro "Falha ao buscar")
             const fd = new FormData();
@@ -206,7 +254,7 @@ export default function MidiaView() {
             if (corpo.descricao) fd.append('descricao', corpo.descricao);
             fd.append('videoUrl', corpo.videoUrl || '');
             fd.append('precisaAprovacao', String(corpo.precisaAprovacao));
-            fd.append('arquivo', uploadArquivo);
+            fd.append('arquivo', arquivoParaEnvio);
             corpo = fd;
           }
 
@@ -457,9 +505,41 @@ export default function MidiaView() {
                 ref={fileRef}
                 type="file"
                 accept="image/*"
-                onChange={e => setUploadArquivo(e.target.files?.[0] ?? null)}
+                onChange={async (e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  setUploadArquivo(file);
+                  if (!file) { setPreviewUrl(null); setArquivoInfo(null); return; }
+                  setPreviewUrl(URL.createObjectURL(file));
+                  const img = new Image();
+                  img.src = URL.createObjectURL(file);
+                  img.onload = () => {
+                    const kb = Math.round(file.size / 1024);
+                    setArquivoInfo(`${img.width} × ${img.height} • ${kb} KB`);
+                    URL.revokeObjectURL(img.src);
+                  };
+                }}
                 className="input"
               />
+              {previewUrl && (
+                <div className="mt-2 relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950">
+                  <img src={previewUrl} alt="Pré-visualização" className="w-full h-48 object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadArquivo(null); setPreviewUrl(null); setArquivoInfo(null);
+                      if (fileRef.current) fileRef.current.value = '';
+                    }}
+                    className="absolute top-2 right-2 bg-black/60 hover:bg-black/90 text-white rounded-full w-7 h-7 flex items-center justify-center"
+                  >
+                    <X size={14} />
+                  </button>
+                  {arquivoInfo && (
+                    <div className="absolute bottom-2 left-2 bg-black/60 text-[11px] text-slate-300 px-2 py-1 rounded">
+                      {arquivoInfo}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
