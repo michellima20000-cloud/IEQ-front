@@ -183,34 +183,49 @@ export default function MidiaView() {
     }
 
     setCarregando(true);
+    let ultimoErro: any = null;
     try {
-      let corpo: any = {
-        tipo: uploadTipo,
-        titulo: uploadTitulo,
-        descricao: uploadDescricao || null,
-        precisaAprovacao: uploadRequerAprovacao,
-      };
-      if (uploadYoutube) corpo.videoUrl = uploadYoutube;
-      if (uploadArquivo) {
-        // Multipart com o arquivo binário (sem converter para base64,
-        // que estourava a requisição e causava o erro "Falha ao buscar")
-        const fd = new FormData();
-        fd.append('tipo', corpo.tipo);
-        fd.append('titulo', corpo.titulo);
-        if (corpo.descricao) fd.append('descricao', corpo.descricao);
-        fd.append('videoUrl', corpo.videoUrl || '');
-        fd.append('precisaAprovacao', String(corpo.precisaAprovacao));
-        fd.append('arquivo', uploadArquivo);
-        corpo = fd;
-      }
+      let tentativa = 0;
+      const maxTentativas = 2;
+      while (tentativa < maxTentativas) {
+        tentativa++;
+        try {
+          let corpo: any = {
+            tipo: uploadTipo,
+            titulo: uploadTitulo,
+            descricao: uploadDescricao || null,
+            precisaAprovacao: uploadRequerAprovacao,
+          };
+          if (uploadYoutube) corpo.videoUrl = uploadYoutube;
+          if (uploadArquivo) {
+            // Multipart com o arquivo binário (sem converter para base64,
+            // que estourava a requisição e causava o erro "Falha ao buscar")
+            const fd = new FormData();
+            fd.append('tipo', corpo.tipo);
+            fd.append('titulo', corpo.titulo);
+            if (corpo.descricao) fd.append('descricao', corpo.descricao);
+            fd.append('videoUrl', corpo.videoUrl || '');
+            fd.append('precisaAprovacao', String(corpo.precisaAprovacao));
+            fd.append('arquivo', uploadArquivo);
+            corpo = fd;
+          }
 
-      await api.post('/midia', corpo);
-      setSucesso('Mídia enviada com sucesso!');
-      setUploadTitulo(''); setUploadDescricao(''); setUploadYoutube('');
-      setUploadArquivo(null); if (fileRef.current) fileRef.current.value = '';
-      await carregarMidias();
-    } catch (err: any) {
-      setErro(msgErro(err, 'Erro ao enviar a mídia.'));
+          await api.post('/midia', corpo);
+          setSucesso('Mídia enviada com sucesso!');
+          setUploadTitulo(''); setUploadDescricao(''); setUploadYoutube('');
+          setUploadArquivo(null); if (fileRef.current) fileRef.current.value = '';
+          await carregarMidias();
+          return;
+        } catch (err: any) {
+          ultimoErro = err;
+          // Sem resposta do servidor = erro de rede (ex: "Failed to fetch"): tenta mais uma vez
+          if (tentativa < maxTentativas && !err?.response) {
+            continue;
+          }
+          setErro(msgErro(err, 'Falha ao enviar a mídia. Verifique sua conexão e tente novamente.'));
+          break;
+        }
+      }
     } finally {
       setCarregando(false);
     }
